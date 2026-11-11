@@ -5,7 +5,6 @@ import json
 import hmac
 import base64
 import httpx
-import asyncio
 
 from hashlib import sha256
 from datetime import datetime, timezone
@@ -41,12 +40,7 @@ def sign(timestamp, method, path, body=""):
     ).decode()
 
 
-async def place_order(
-    inst_id,
-    side,
-    pos_side,
-    size
-):
+async def place_order(inst_id, side, size):
 
     try:
         size = max(
@@ -62,7 +56,6 @@ async def place_order(
         "instId": inst_id,
         "tdMode": "isolated",
         "side": side,
-        "posSide": pos_side,
         "ordType": "market",
         "sz": str(size)
     }
@@ -102,6 +95,8 @@ async def place_order(
         )
 
         print("===================================")
+        print("SIGNAL EXECUTED")
+        print(body_dict)
         print("OKX RESPONSE")
         print(response.text)
         print("===================================")
@@ -109,7 +104,11 @@ async def place_order(
         return response.text
 
 
-async def execute_order(data):
+@app.post("/webhook")
+async def webhook(data: Dict[str, Any]):
+
+    print("SIGNAL RECEIVED:")
+    print(data)
 
     action = str(
         data.get("action", "")
@@ -123,44 +122,18 @@ async def execute_order(data):
         data.get("instId", "")
     )
 
-    strategy = str(
-        data.get("strategy", "")
-    )
+    if action not in ["buy", "sell"]:
+        return {
+            "status": "ignored"
+        }
 
-    print("SIGNAL RECEIVED:")
-    print(strategy)
-    print(data)
-
-    if action == "buy":
-
-        result = await place_order(
-            inst_id,
-            "buy",
-            "long",
-            amount
-        )
-
-        print(result)
-
-    elif action == "sell":
-
-        result = await place_order(
-            inst_id,
-            "sell",
-            "short",
-            amount
-        )
-
-        print(result)
-
-
-@app.post("/webhook")
-async def webhook(data: Dict[str, Any]):
-
-    asyncio.create_task(
-        execute_order(data)
+    result = await place_order(
+        inst_id,
+        action,
+        amount
     )
 
     return {
-        "status": "received"
+        "status": "executed",
+        "okx": result
     }
