@@ -5,6 +5,7 @@ import json
 import hmac
 import base64
 import httpx
+import asyncio
 
 from hashlib import sha256
 from datetime import datetime, timezone
@@ -22,7 +23,9 @@ BASE_URL = "https://my.okx.com"
 
 @app.get("/")
 def home():
-    return {"status": "running"}
+    return {
+        "status": "running"
+    }
 
 
 def sign(timestamp, method, path, body=""):
@@ -42,7 +45,7 @@ def sign(timestamp, method, path, body=""):
 
 async def place_order(inst_id, side, size):
 
-    # TradingView amount => OKX valid contracts
+    # Convert TradingView size to valid contract count
     try:
         size = max(1, round(float(size)))
     except:
@@ -92,45 +95,70 @@ async def place_order(inst_id, side, size):
             content=body
         )
 
-        print("OKX RESPONSE:")
+        print("===================================")
+        print("OKX RESPONSE")
         print(response.text)
+        print("===================================")
 
         return response.text
+
+
+async def execute_order(data):
+
+    try:
+
+        action = str(
+            data.get("action", "")
+        ).lower()
+
+        amount = str(
+            data.get("amount", "1")
+        )
+
+        inst_id = str(
+            data.get("instId", "")
+        )
+
+        print("SIGNAL RECEIVED:")
+        print(data)
+
+        if action == "buy":
+
+            result = await place_order(
+                inst_id,
+                "buy",
+                amount
+            )
+
+            print(result)
+
+        elif action == "sell":
+
+            result = await place_order(
+                inst_id,
+                "sell",
+                amount
+            )
+
+            print(result)
+
+        else:
+
+            print("UNKNOWN ACTION:", action)
+
+    except Exception as e:
+
+        print("ERROR:")
+        print(str(e))
 
 
 @app.post("/webhook")
 async def webhook(data: Dict[str, Any]):
 
-    print("SIGNAL RECEIVED:")
-    print(data)
-
-    action = str(
-        data.get("action", "")
-    ).lower()
-
-    amount = str(
-        data.get("amount", "1")
-    )
-
-    inst_id = str(
-        data.get("instId", "")
-    )
-
-    if action not in ["buy", "sell"]:
-        return {
-            "status": "ignored",
-            "received": data
-        }
-
-    result = await place_order(
-        inst_id,
-        action,
-        amount
+    asyncio.create_task(
+        execute_order(data)
     )
 
     return {
-        "action": action,
-        "amount": amount,
-        "instId": inst_id,
-        "okx": result
+        "status": "received"
     }
