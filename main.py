@@ -23,9 +23,7 @@ BASE_URL = "https://my.okx.com"
 
 @app.get("/")
 def home():
-    return {
-        "status": "running"
-    }
+    return {"status": "running"}
 
 
 def sign(timestamp, method, path, body=""):
@@ -43,11 +41,18 @@ def sign(timestamp, method, path, body=""):
     ).decode()
 
 
-async def place_order(inst_id, side, size):
+async def place_order(
+    inst_id,
+    side,
+    pos_side,
+    size
+):
 
-    # Convert TradingView size to valid contract count
     try:
-        size = max(1, int(float(size)))
+        size = max(
+            1,
+            int(float(size))
+        )
     except:
         size = 1
 
@@ -57,6 +62,7 @@ async def place_order(inst_id, side, size):
         "instId": inst_id,
         "tdMode": "isolated",
         "side": side,
+        "posSide": pos_side,
         "ordType": "market",
         "sz": str(size)
     }
@@ -105,51 +111,47 @@ async def place_order(inst_id, side, size):
 
 async def execute_order(data):
 
-    try:
+    action = str(
+        data.get("action", "")
+    ).lower()
 
-        action = str(
-            data.get("action", "")
-        ).lower()
+    amount = str(
+        data.get("amount", "1")
+    )
 
-        amount = str(
-            data.get("amount", "1")
+    inst_id = str(
+        data.get("instId", "")
+    )
+
+    strategy = str(
+        data.get("strategy", "")
+    )
+
+    print("SIGNAL RECEIVED:")
+    print(strategy)
+    print(data)
+
+    if action == "buy":
+
+        result = await place_order(
+            inst_id,
+            "buy",
+            "long",
+            amount
         )
 
-        inst_id = str(
-            data.get("instId", "")
+        print(result)
+
+    elif action == "sell":
+
+        result = await place_order(
+            inst_id,
+            "sell",
+            "short",
+            amount
         )
 
-        print("SIGNAL RECEIVED:")
-        print(data)
-
-        if action == "buy":
-
-            result = await place_order(
-                inst_id,
-                "buy",
-                amount
-            )
-
-            print(result)
-
-        elif action == "sell":
-
-            result = await place_order(
-                inst_id,
-                "sell",
-                amount
-            )
-
-            print(result)
-
-        else:
-
-            print("UNKNOWN ACTION:", action)
-
-    except Exception as e:
-
-        print("ERROR:")
-        print(str(e))
+        print(result)
 
 
 @app.post("/webhook")
