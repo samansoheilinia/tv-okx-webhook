@@ -47,7 +47,7 @@ async def place_order(inst_id, side, size):
 
     # Convert TradingView size to valid contract count
     try:
-        size = max(1, round(float(size)))
+        size = max(1, int(float(size)))
     except:
         size = 1
 
