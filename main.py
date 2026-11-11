@@ -1,4 +1,5 @@
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
+from typing import Dict, Any
 
 app = FastAPI()
 
@@ -7,13 +8,11 @@ def home():
     return {"status": "running"}
 
 @app.post("/webhook")
-async def webhook(request: Request):
-
-    data = await request.json()
+async def webhook(data: Dict[str, Any]):
 
     print(data)
 
     return {
         "status": "success",
-        "data": data
+        "received": data
     }
