@@ -38,6 +38,10 @@ def sign(timestamp, method, path, body):
 
 async def place_order(side):
 
+    print("API_KEY =", API_KEY[:8] if API_KEY else None)
+    print("PASSPHRASE =", PASSPHRASE)
+    print("SECRET_EXISTS =", SECRET_KEY is not None)
+
     path = "/api/v5/trade/order"
 
     body_dict = {
