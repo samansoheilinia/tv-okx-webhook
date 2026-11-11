@@ -24,7 +24,7 @@ def home():
     return {"status": "running"}
 
 
-def sign(timestamp, method, path, body):
+def sign(timestamp, method, path, body=""):
 
     message = timestamp + method + path + body
 
@@ -37,7 +37,7 @@ def sign(timestamp, method, path, body):
     return base64.b64encode(mac.digest()).decode()
 
 
-async def place_order(side):
+async def test_okx_connection():
 
     print("========== DEBUG ==========")
     print("API_KEY =", API_KEY[:8] if API_KEY else None)
@@ -47,17 +47,7 @@ async def place_order(side):
     print("INST_ID =", INST_ID)
     print("===========================")
 
-    path = "/api/v5/trade/order"
-
-    body_dict = {
-        "instId": INST_ID,
-        "tdMode": "cross",
-        "side": side,
-        "ordType": "market",
-        "sz": "1"
-    }
-
-    body = json.dumps(body_dict)
+    path = "/api/v5/account/balance"
 
     timestamp = (
         datetime.now(timezone.utc)
@@ -67,9 +57,9 @@ async def place_order(side):
 
     signature = sign(
         timestamp,
-        "POST",
+        "GET",
         path,
-        body
+        ""
     )
 
     headers = {
@@ -80,16 +70,14 @@ async def place_order(side):
         "Content-Type": "application/json"
     }
 
-    # فقط برای Demo
     if FLAG == "1":
         headers["x-simulated-trading"] = "1"
 
     async with httpx.AsyncClient() as client:
 
-        r = await client.post(
+        r = await client.get(
             "https://www.okx.com" + path,
-            headers=headers,
-            content=body
+            headers=headers
         )
 
         print("OKX RESPONSE:")
@@ -104,29 +92,9 @@ async def webhook(data: Dict[str, Any]):
     print("SIGNAL RECEIVED:")
     print(data)
 
-    action = str(
-        data.get("action", "")
-    ).lower()
-
-    if action == "buy":
-
-        result = await place_order("buy")
-
-        return {
-            "status": "long_sent",
-            "okx": result
-        }
-
-    if action == "sell":
-
-        result = await place_order("sell")
-
-        return {
-            "status": "short_sent",
-            "okx": result
-        }
+    result = await test_okx_connection()
 
     return {
-        "status": "ignored",
-        "received": data
+        "status": "test",
+        "okx": result
     }
