@@ -14,7 +14,7 @@ API_KEY = os.getenv("OKX_API_KEY")
 SECRET_KEY = os.getenv("OKX_SECRET_KEY")
 PASSPHRASE = os.getenv("OKX_PASSPHRASE")
 
-FLAG = os.getenv("OKX_FLAG", "1")
+FLAG = os.getenv("OKX_FLAG", "0")
 
 INST_ID = os.getenv("OKX_INST_ID", "BTC-USDT-SWAP")
 
@@ -25,6 +25,7 @@ def home():
 
 
 def sign(timestamp, method, path, body):
+
     message = timestamp + method + path + body
 
     mac = hmac.new(
@@ -38,9 +39,13 @@ def sign(timestamp, method, path, body):
 
 async def place_order(side):
 
+    print("========== DEBUG ==========")
     print("API_KEY =", API_KEY[:8] if API_KEY else None)
     print("PASSPHRASE =", PASSPHRASE)
     print("SECRET_EXISTS =", SECRET_KEY is not None)
+    print("FLAG =", FLAG)
+    print("INST_ID =", INST_ID)
+    print("===========================")
 
     path = "/api/v5/trade/order"
 
@@ -54,9 +59,11 @@ async def place_order(side):
 
     body = json.dumps(body_dict)
 
-    timestamp = datetime.now(
-        timezone.utc
-    ).isoformat(timespec="milliseconds").replace("+00:00","Z")
+    timestamp = (
+        datetime.now(timezone.utc)
+        .isoformat(timespec="milliseconds")
+        .replace("+00:00", "Z")
+    )
 
     signature = sign(
         timestamp,
@@ -70,9 +77,12 @@ async def place_order(side):
         "OK-ACCESS-SIGN": signature,
         "OK-ACCESS-TIMESTAMP": timestamp,
         "OK-ACCESS-PASSPHRASE": PASSPHRASE,
-        "Content-Type": "application/json",
-        "x-simulated-trading": FLAG
+        "Content-Type": "application/json"
     }
+
+    # فقط برای Demo
+    if FLAG == "1":
+        headers["x-simulated-trading"] = "1"
 
     async with httpx.AsyncClient() as client:
 
@@ -82,12 +92,16 @@ async def place_order(side):
             content=body
         )
 
+        print("OKX RESPONSE:")
+        print(r.text)
+
         return r.text
 
 
 @app.post("/webhook")
 async def webhook(data: Dict[str, Any]):
 
+    print("SIGNAL RECEIVED:")
     print(data)
 
     action = str(
@@ -113,5 +127,6 @@ async def webhook(data: Dict[str, Any]):
         }
 
     return {
-        "status": "ignored"
+        "status": "ignored",
+        "received": data
     }
