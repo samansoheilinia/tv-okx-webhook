@@ -1,13 +1,55 @@
-async def place_order(side, amount):
+from fastapi import FastAPI
+from typing import Dict, Any
+import os
+import json
+import hmac
+import base64
+import httpx
+
+from hashlib import sha256
+from datetime import datetime, timezone
+
+app = FastAPI()
+
+API_KEY = os.getenv("OKX_API_KEY")
+SECRET_KEY = os.getenv("OKX_SECRET_KEY")
+PASSPHRASE = os.getenv("OKX_PASSPHRASE")
+
+FLAG = os.getenv("OKX_FLAG", "0")
+
+BASE_URL = "https://my.okx.com"
+
+
+@app.get("/")
+def home():
+    return {"status": "running"}
+
+
+def sign(timestamp, method, path, body=""):
+
+    message = timestamp + method + path + body
+
+    mac = hmac.new(
+        SECRET_KEY.encode(),
+        message.encode(),
+        digestmod=sha256
+    )
+
+    return base64.b64encode(
+        mac.digest()
+    ).decode()
+
+
+async def place_order(inst_id, side, size):
 
     path = "/api/v5/trade/order"
 
     body_dict = {
-        "instId": INST_ID,
+        "instId": inst_id,
         "tdMode": "cross",
         "side": side,
         "ordType": "market",
-        "sz": str(amount)
+        "sz": str(size)
     }
 
     body = json.dumps(body_dict)
@@ -15,7 +57,7 @@ async def place_order(side, amount):
     timestamp = (
         datetime.now(timezone.utc)
         .isoformat(timespec="milliseconds")
-        .replace("+00:00","Z")
+        .replace("+00:00", "Z")
     )
 
     signature = sign(
@@ -33,12 +75,60 @@ async def place_order(side, amount):
         "Content-Type": "application/json"
     }
 
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=30) as client:
 
         response = await client.post(
-            "https://my.okx.com" + path,
+            BASE_URL + path,
             headers=headers,
             content=body
         )
 
         return response.text
+
+
+@app.post("/webhook")
+async def webhook(data: Dict[str, Any]):
+
+    print("SIGNAL:", data)
+
+    action = str(
+        data.get("action", "")
+    ).lower()
+
+    amount = str(
+        data.get("amount", "1")
+    )
+
+    inst_id = str(
+        data.get("instId")
+    )
+
+    if action == "buy":
+
+        result = await place_order(
+            inst_id,
+            "buy",
+            amount
+        )
+
+        return {
+            "action": "buy",
+            "okx": result
+        }
+
+    if action == "sell":
+
+        result = await place_order(
+            inst_id,
+            "sell",
+            amount
+        )
+
+        return {
+            "action": "sell",
+            "okx": result
+        }
+
+    return {
+        "status": "ignored"
+    }
