@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from typing import Dict, Any
+import os
 
 app = FastAPI()
 
@@ -10,6 +11,7 @@ def home():
 @app.post("/webhook")
 async def webhook(data: Dict[str, Any]):
 
+    print("SIGNAL RECEIVED:")
     print(data)
 
     return {
