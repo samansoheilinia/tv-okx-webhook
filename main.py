@@ -42,18 +42,18 @@ def sign(timestamp, method, path, body=""):
 
 async def place_order(inst_id, side, size):
 
+    # TradingView amount => OKX valid contracts
+    try:
+        size = max(1, round(float(size)))
+    except:
+        size = 1
+
     path = "/api/v5/trade/order"
-
-    pos_side = "long"
-
-    if side == "sell":
-        pos_side = "short"
 
     body_dict = {
         "instId": inst_id,
         "tdMode": "isolated",
         "side": side,
-        "posSide": pos_side,
         "ordType": "market",
         "sz": str(size)
     }
@@ -116,32 +116,21 @@ async def webhook(data: Dict[str, Any]):
         data.get("instId", "")
     )
 
-    if action == "buy":
-
-        result = await place_order(
-            inst_id,
-            "buy",
-            amount
-        )
-
+    if action not in ["buy", "sell"]:
         return {
-            "action": "buy",
-            "okx": result
+            "status": "ignored",
+            "received": data
         }
 
-    if action == "sell":
-
-        result = await place_order(
-            inst_id,
-            "sell",
-            amount
-        )
-
-        return {
-            "action": "sell",
-            "okx": result
-        }
+    result = await place_order(
+        inst_id,
+        action,
+        amount
+    )
 
     return {
-        "status": "ignored"
+        "action": action,
+        "amount": amount,
+        "instId": inst_id,
+        "okx": result
     }
