@@ -22,7 +22,9 @@ BASE_URL = "https://my.okx.com"
 
 @app.get("/")
 def home():
-    return {"status": "running"}
+    return {
+        "status": "running"
+    }
 
 
 def sign(timestamp, method, path, body=""):
@@ -42,10 +44,13 @@ def sign(timestamp, method, path, body=""):
 
 async def place_order(inst_id, side, size):
 
-   try:
-    size = max(0.01, round(float(size), 2))
-   except:
-    size = 0.01
+    try:
+        size = max(
+            0.01,
+            round(float(size), 2)
+        )
+    except:
+        size = 0.01
 
     path = "/api/v5/trade/order"
 
@@ -121,7 +126,8 @@ async def webhook(data: Dict[str, Any]):
 
     if action not in ["buy", "sell"]:
         return {
-            "status": "ignored"
+            "status": "ignored",
+            "received": data
         }
 
     result = await place_order(
