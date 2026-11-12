@@ -43,12 +43,13 @@ def sign(timestamp, method, path, body=""):
 async def place_order(inst_id, side, size):
 
     try:
-        size = max(
-            1,
-            int(float(size))
-        )
+        
+    size = max(
+        0.01,
+        round(float(size), 2)
+    )
     except:
-        size = 1
+    size = 0.01
 
     path = "/api/v5/trade/order"
 
