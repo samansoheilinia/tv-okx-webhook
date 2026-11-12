@@ -45,12 +45,20 @@ def sign(timestamp, method, path, body=""):
 async def place_order(inst_id, side, size):
 
     try:
-        size = max(
-            0.01,
-            round(float(size), 2)
+
+        size = round(
+            float(size),
+            2
         )
-    except:
-        size = 0.01
+
+        if size < 0.01:
+            size = 0.01
+
+        size = f"{size:.2f}"
+
+    except Exception:
+
+        size = "0.01"
 
     path = "/api/v5/trade/order"
 
@@ -59,7 +67,7 @@ async def place_order(inst_id, side, size):
         "tdMode": "isolated",
         "side": side,
         "ordType": "market",
-        "sz": str(size)
+        "sz": size
     }
 
     body = json.dumps(body_dict)
@@ -125,6 +133,7 @@ async def webhook(data: Dict[str, Any]):
     )
 
     if action not in ["buy", "sell"]:
+
         return {
             "status": "ignored",
             "received": data
