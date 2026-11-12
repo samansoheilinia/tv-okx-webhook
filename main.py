@@ -44,7 +44,7 @@ async def place_order(inst_id, side, size):
 
    try:
     size = max(0.01, round(float(size), 2))
-except:
+   except:
     size = 0.01
 
     path = "/api/v5/trade/order"
