@@ -1,4 +1,4 @@
-"""TradingView -> OKX target-position bridge, single symbol / isolated / net.
+"""TradingView -> OKX target-position bridge, multiple symbols / isolated / net.
 
 Read README_FA.md BEFORE deployment. This service submits real orders when
 OKX_FLAG=0 (same default as the original). Never run two copies for one account.
@@ -320,8 +320,8 @@ class Engine:
         state["status"] = "submitting_close" if reduce else "submitting_entry"
         state["error"] = None
         self.store.save()
-        log.info("ORDER_SUBMIT version=%s reduceOnly=%s side=%s size=%s clOrdId=%s",
-                 active["version"], reduce, side, size, active["cid"])
+        log.info("ORDER_SUBMIT symbol=%s version=%s reduceOnly=%s side=%s size=%s clOrdId=%s",
+                 self.exchange.symbol, active["version"], reduce, side, size, active["cid"])
         result = await self.exchange.submit(active)
         rows = result.get("data")
         row = rows[0] if isinstance(rows, list) and rows and isinstance(rows[0], dict) else {}
@@ -344,6 +344,8 @@ class Engine:
     async def tick(self):
         self.last_tick = time.time()
         state = self.store.state
+        if not state["signal"] and not state["active"]:
+            return
         if not self.exchange.symbol and state["signal"]:
             self.exchange.symbol = state["signal"]["instId"]
         if not self.exchange.symbol:
@@ -486,19 +488,43 @@ async def lifespan(app):
                                  limits=httpx.Limits(max_connections=4, max_keepalive_connections=4,
                                                     keepalive_expiry=60)) as client:
         app.state.client = client
-        exchange = OKX(client, os.environ["OKX_API_KEY"], os.environ["OKX_SECRET_KEY"],
-                       os.environ["OKX_PASSPHRASE"], flag, base, app.state.symbol, kind)
-        engine = Engine(store, exchange, max_age)
-        app.state.engine = engine
-        task = asyncio.create_task(engine.run())
-        app.state.task = task
-        log.info("BRIDGE_STARTED symbol=%s flag=%s max_entry_age=%s", app.state.symbol, flag, max_age)
+        # Explicit set of requested products; arbitrary alert text cannot create workers.
+        supported = {
+            "SOXL-USD_UM_XPERP-310627", "UNI-USD_UM_XPERP-310718",
+            "ETH-USD_UM_XPERP-310404", "SOL-USD_UM_XPERP-310404",
+            "OKB-USD_UM_XPERP-311003", "PEPE-USD_UM_XPERP-310404",
+            "NEAR-USD_UM_XPERP-310613", "DOGE-USD_UM_XPERP-310404",
+            "HYPE-USD_UM_XPERP-310523", "ZEC-USD_UM_XPERP-310530",
+        }
+        legacy = store.state["signal"]
+        primary = legacy["instId"] if legacy else (symbol or "SOXL-USD_UM_XPERP-310627")
+        supported.add(valid_symbol(primary))
+        if symbol:
+            supported.add(symbol)
+        engines, tasks = {}, {}
+        app.state.engines, app.state.tasks = engines, tasks
         try:
+            for instrument in sorted(supported):
+                if instrument == primary:
+                    ledger = store  # Resume the original single-symbol database.
+                else:
+                    ledger = Store(state_path + "." + instrument if persistent else ":memory:",
+                                   identity + ":" + instrument)
+                exchange = OKX(client, os.environ["OKX_API_KEY"], os.environ["OKX_SECRET_KEY"],
+                               os.environ["OKX_PASSPHRASE"], flag, base, instrument, kind)
+                engine = Engine(ledger, exchange, max_age)
+                engines[instrument] = engine
+                tasks[instrument] = asyncio.create_task(engine.run(), name=instrument)
+            app.state.engine = engines[primary]
+            log.info("MULTI_SYMBOL_READY symbols=%d storage=%s", len(engines), app.state.storage)
             yield
         finally:
-            task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await task
+            for task in tasks.values():
+                task.cancel()
+            await asyncio.gather(*tasks.values(), return_exceptions=True)
+            for engine in engines.values():
+                if engine.store is not store:
+                    engine.store.db.close()
             store.db.close()
             lock.close()
 
@@ -509,17 +535,18 @@ app = FastAPI(lifespan=lifespan)
 @app.get("/")
 def home():
     # Liveness only: an OKX outage must not cause a restart loop.
-    task = app.state.task
-    if task.done():
+    if any(task.done() for task in app.state.tasks.values()):
         raise HTTPException(503, "Worker stopped")
-    return {"status": "running", "worker": "alive", "storage": app.state.storage}
+    return {"status": "running", "worker": "alive", "mode": "multi_symbol", "storage": app.state.storage}
 
 
 @app.get("/status")
-async def status(x_webhook_secret: str = Header(default="")):
+async def status(x_webhook_secret: str = Header(default=""), instId: str = ""):
     if not app.state.secret or not hmac.compare_digest(x_webhook_secret.encode(), app.state.secret.encode()):
         raise HTTPException(401, "Unauthorized")
-    engine = app.state.engine
+    engine = app.state.engines.get(instId) if instId else app.state.engine
+    if engine is None:
+        raise HTTPException(422, "Unknown instId")
     return {"ready": engine.ready, "last_tick": engine.last_tick, **engine.store.state}
 
 
@@ -549,15 +576,19 @@ async def webhook(request: Request):
         log.info("TEST_SIGNAL_RECEIVED: no order was queued or submitted")
         return {"status": "test_received", "order_sent": False}
     try:
-        signal = normalize(data, app.state.symbol)
+        signal = normalize(data, "")
+        if signal["instId"] not in app.state.engines:
+            raise ValueError("instId is not in the configured symbol list")
     except (ValueError, TypeError, KeyError, OverflowError) as exc:
+        log.warning("VALIDATION_FAILED reason=%s", exc)
         raise HTTPException(422, str(exc)) from None
-    engine = app.state.engine
-    if app.state.task.done():
+    engine = app.state.engines[signal["instId"]]
+    if app.state.tasks[signal["instId"]].done():
         raise HTTPException(503, "Worker stopped")
     try:
         result = engine.store.accept(signal)
     except ValueError as exc:
+        log.warning("VALIDATION_FAILED reason=%s", exc)
         raise HTTPException(422, str(exc)) from None
     except sqlite3.Error:
         raise HTTPException(503, "Signal was NOT recorded; state storage unavailable") from None
@@ -577,6 +608,7 @@ async def check(instId: str = "", x_webhook_secret: str = Header(default="")):
     try:
         symbol = valid_symbol(instId or app.state.symbol)
     except ValueError as exc:
+        log.warning("VALIDATION_FAILED reason=%s", exc)
         raise HTTPException(422, str(exc)) from None
     source = app.state.engine.exchange
     probe = OKX(app.state.client, source.key, source.secret, source.passphrase,
