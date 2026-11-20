@@ -19,7 +19,7 @@ import time
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-from decimal import Decimal, InvalidOperation, ROUND_DOWN
+from decimal import Decimal, InvalidOperation, ROUND_DOWN, localcontext
 from pathlib import Path
 from urllib.parse import urlencode
 
@@ -46,7 +46,9 @@ def number(value):
 
 
 def floor_size(value, step):
-    return (value / step).to_integral_value(rounding=ROUND_DOWN) * step
+    with localcontext() as ctx:
+        ctx.prec = 80
+        return (value / step).to_integral_value(rounding=ROUND_DOWN) * step
 
 
 def direction(value):
@@ -98,6 +100,22 @@ def normalize(data, symbol):
         result[key] = format(value, "f")
     result["ts"] = ts
     result["target"] = format(target, "f")
+    # Keep the historical event key for unit scaling, including old retries.
+    try:
+        multiplier = number(data.get("qtyMultiplier", 1))
+        if multiplier <= 0:
+            raise ValueError()
+    except ValueError:
+        raise ValueError("qtyMultiplier must be a finite positive decimal") from None
+    if multiplier != 1:
+        # Preserve raw TradingView fields for audit. Only the target drives orders.
+        with localcontext() as ctx:
+            ctx.prec = 64
+            scaled = size * multiplier if size else D(0)
+            if scaled > D("1e12"):
+                raise ValueError("Scaled target exceeds the supported quantity range")
+            result["target"] = format(scaled * sides[side], "f")
+            result["qtyMultiplier"] = format(multiplier.normalize(), "f")
     canonical = json.dumps(result, sort_keys=True, separators=(",", ":"))
     result["event"] = hashlib.sha256(canonical.encode()).hexdigest()
     return result
@@ -369,7 +387,7 @@ class Engine:
         if signal is None:
             return
         raw = D(signal["target"])
-        target = floor_size(abs(raw), self.exchange.step) * direction(raw)
+        target = floor_size(raw.copy_abs(), self.exchange.step) * direction(raw)
         if actual and (raw == 0 or direction(actual) != direction(raw)):
             state["close_required"] = True
             self.store.save()
@@ -563,6 +581,9 @@ async def webhook(request: Request):
         raise HTTPException(413, "Payload too large")
     try:
         data = json.loads(body)
+        if isinstance(data, dict) and isinstance(data.get("qtyMultiplier"), float):
+            # Preserve the exact JSON decimal without changing legacy event hashes.
+            data["qtyMultiplier"] = json.loads(body, parse_float=str)["qtyMultiplier"]
     except (ValueError, UnicodeDecodeError):
         raise HTTPException(400, "Invalid JSON") from None
     if not isinstance(data, dict):
